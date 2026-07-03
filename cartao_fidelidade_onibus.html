@@ -1,0 +1,268 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Cartão Fidelidade do Ônibus 🚌</title>
+<style>
+    :root {
+        --primary: #2563eb;
+        --primary-dark: #1d4ed8;
+        --bg: #f1f5f9;
+        --card-bg: #ffffff;
+        --text: #1e293b;
+        --muted: #64748b;
+        --gold: #f59e0b;
+    }
+    * { box-sizing: border-box; }
+    body {
+        margin: 0;
+        font-family: 'Segoe UI', system-ui, sans-serif;
+        background: var(--bg);
+        color: var(--text);
+        display: flex;
+        justify-content: center;
+        padding: 32px 16px;
+    }
+    .container { width: 100%; max-width: 480px; }
+    h1 { text-align: center; font-size: 1.6rem; margin-bottom: 4px; }
+    .subtitle { text-align: center; color: var(--muted); margin-bottom: 24px; font-size: 0.95rem; }
+    .card {
+        background: var(--card-bg);
+        border-radius: 16px;
+        padding: 24px;
+        box-shadow: 0 1px 3px rgba(0,0,0,0.08), 0 4px 12px rgba(0,0,0,0.04);
+        margin-bottom: 20px;
+    }
+    .tickets { display: flex; gap: 8px; justify-content: center; flex-wrap: wrap; margin: 16px 0 8px; }
+    .ticket {
+        width: 44px; height: 44px; border-radius: 10px;
+        display: flex; align-items: center; justify-content: center;
+        font-size: 1.3rem; background: #e2e8f0; border: 2px dashed #cbd5e1;
+        transition: all 0.2s ease;
+    }
+    .ticket.preenchido { background: var(--primary); border: 2px solid var(--primary-dark); }
+    .progresso-texto { text-align: center; color: var(--muted); font-size: 0.9rem; margin-bottom: 4px; }
+    .gratis-box {
+        text-align: center;
+        background: linear-gradient(135deg, var(--gold), #fbbf24);
+        color: #7c2d12; border-radius: 12px; padding: 14px;
+        font-weight: 600; margin-bottom: 16px; display: none;
+    }
+    .btns { display: flex; flex-direction: column; gap: 10px; }
+    button {
+        border: none; border-radius: 10px; padding: 14px;
+        font-size: 1rem; font-weight: 600; cursor: pointer;
+        transition: transform 0.05s ease, opacity 0.15s ease;
+        width: 100%;
+    }
+    button:active { transform: scale(0.98); }
+    .btn-primary { background: var(--primary); color: white; }
+    .btn-primary:hover { background: var(--primary-dark); }
+    .btn-gold { background: var(--gold); color: #7c2d12; }
+    .btn-gold:disabled { opacity: 0.4; cursor: not-allowed; }
+    .btn-ghost {
+        background: transparent; color: var(--muted);
+        font-weight: 400; font-size: 0.85rem; text-decoration: underline;
+    }
+    .flash {
+        padding: 12px 16px; border-radius: 10px; margin-bottom: 16px;
+        font-size: 0.9rem; text-align: center; display: none;
+    }
+    .flash.sucesso { background: #dcfce7; color: #166534; }
+    .flash.info { background: #dbeafe; color: #1e40af; }
+    .flash.erro { background: #fee2e2; color: #991b1b; }
+
+    .historico h2 { font-size: 1rem; margin-bottom: 12px; color: var(--muted); }
+    .item {
+        display: flex; justify-content: space-between;
+        padding: 10px 0; border-bottom: 1px solid #f1f5f9; font-size: 0.9rem;
+    }
+    .item:last-child { border-bottom: none; }
+    .badge {
+        font-size: 0.75rem; padding: 2px 8px; border-radius: 999px;
+        background: #fef3c7; color: #92400e; font-weight: 600;
+    }
+    .vazio { color: var(--muted); font-size: 0.9rem; }
+</style>
+</head>
+<body>
+<div class="container">
+    <h1>🚌 Cartão Fidelidade</h1>
+    <p class="subtitle">A cada <span id="metaTexto">5</span> viagens pagas, uma sai de graça</p>
+
+    <div id="flash" class="flash"></div>
+
+    <div class="card">
+        <div id="gratisBox" class="gratis-box"></div>
+
+        <div class="progresso-texto" id="progressoTexto"></div>
+        <div class="tickets" id="tickets"></div>
+        <p class="progresso-texto" id="faltamTexto"></p>
+
+        <div class="btns" style="margin-top: 20px;">
+            <button id="btnRegistrar" class="btn-primary">➕ Registrar viagem de ônibus</button>
+            <button id="btnUsarGratis" class="btn-gold">🎫 Usar viagem grátis</button>
+        </div>
+    </div>
+
+    <div class="card historico">
+        <h2 id="totalTexto">Total: 0 viagens pagas registradas</h2>
+        <div id="historico"></div>
+    </div>
+
+    <button id="btnResetar" class="btn-ghost">Zerar histórico</button>
+</div>
+
+<script>
+    const VIAGENS_PARA_PREMIO = 5;
+    const STORAGE_KEY = "cartao_fidelidade_onibus";
+
+    function carregarViagens() {
+        const dados = localStorage.getItem(STORAGE_KEY);
+        return dados ? JSON.parse(dados) : [];
+    }
+
+    function salvarViagens(viagens) {
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(viagens));
+    }
+
+    function contarStatus(viagens) {
+        // Processa em ordem cronológica. O contador de "carimbos" (cicloAtual)
+        // só é resetado quando uma viagem grátis é efetivamente USADA,
+        // não automaticamente ao completar 5.
+        let totalPagas = 0;
+        let cicloAtual = 0;
+        let gratisAcumuladas = 0;
+        let gratisJaContabilizadaNesteCiclo = false;
+
+        for (const v of viagens) {
+            if (v.gratis) {
+                gratisAcumuladas--;
+                cicloAtual = 0;
+                gratisJaContabilizadaNesteCiclo = false;
+            } else {
+                totalPagas++;
+                cicloAtual++;
+                if (cicloAtual >= VIAGENS_PARA_PREMIO && !gratisJaContabilizadaNesteCiclo) {
+                    gratisAcumuladas++;
+                    gratisJaContabilizadaNesteCiclo = true;
+                }
+            }
+        }
+        return { totalPagas, cicloAtual, gratisAcumuladas };
+    }
+
+    function formatarDataHora(data) {
+        const d = String(data.getDate()).padStart(2, "0");
+        const m = String(data.getMonth() + 1).padStart(2, "0");
+        const a = data.getFullYear();
+        const h = String(data.getHours()).padStart(2, "0");
+        const min = String(data.getMinutes()).padStart(2, "0");
+        return `${d}/${m}/${a} ${h}:${min}`;
+    }
+
+    function mostrarFlash(mensagem, tipo) {
+        const flash = document.getElementById("flash");
+        flash.textContent = mensagem;
+        flash.className = `flash ${tipo}`;
+        flash.style.display = "block";
+        setTimeout(() => { flash.style.display = "none"; }, 4000);
+    }
+
+    function render() {
+        const viagens = carregarViagens();
+        const { totalPagas, cicloAtual, gratisAcumuladas } = contarStatus(viagens);
+        const faltam = VIAGENS_PARA_PREMIO - cicloAtual;
+
+        document.getElementById("metaTexto").textContent = VIAGENS_PARA_PREMIO;
+
+        const gratisBox = document.getElementById("gratisBox");
+        if (gratisAcumuladas > 0) {
+            gratisBox.style.display = "block";
+            gratisBox.textContent = `🎁 Você tem ${gratisAcumuladas} viagem${gratisAcumuladas > 1 ? "s" : ""} grátis disponível!`;
+        } else {
+            gratisBox.style.display = "none";
+        }
+
+        const cicloExibido = Math.min(cicloAtual, VIAGENS_PARA_PREMIO);
+
+        document.getElementById("progressoTexto").textContent =
+            `${cicloExibido} de ${VIAGENS_PARA_PREMIO} viagens desde o último prêmio`;
+
+        const ticketsDiv = document.getElementById("tickets");
+        ticketsDiv.innerHTML = "";
+        for (let i = 0; i < VIAGENS_PARA_PREMIO; i++) {
+            const t = document.createElement("div");
+            t.className = "ticket" + (i < cicloExibido ? " preenchido" : "");
+            t.textContent = i < cicloExibido ? "🎫" : "";
+            ticketsDiv.appendChild(t);
+        }
+
+        const faltamTexto = document.getElementById("faltamTexto");
+        if (gratisAcumuladas > 0) {
+            faltamTexto.textContent = "Cartão completo! Use sua viagem grátis quando quiser.";
+        } else if (cicloExibido === 0) {
+            faltamTexto.textContent = "Registre sua próxima viagem para começar!";
+        } else {
+            faltamTexto.textContent = `Faltam ${faltam} viagem${faltam > 1 ? "s" : ""} para a próxima grátis`;
+        }
+
+        document.getElementById("btnUsarGratis").disabled = gratisAcumuladas === 0;
+
+        document.getElementById("totalTexto").textContent =
+            `Total: ${totalPagas} viagens pagas registradas`;
+
+        const historicoDiv = document.getElementById("historico");
+        const ultimas = viagens.slice(-15).reverse();
+        if (ultimas.length === 0) {
+            historicoDiv.innerHTML = '<p class="vazio">Nenhuma viagem registrada ainda.</p>';
+        } else {
+            historicoDiv.innerHTML = ultimas.map(v => `
+                <div class="item">
+                    <span>${v.dataHora}</span>
+                    ${v.gratis ? '<span class="badge">GRÁTIS</span>' : '<span>paga</span>'}
+                </div>
+            `).join("");
+        }
+    }
+
+    document.getElementById("btnRegistrar").addEventListener("click", () => {
+        const viagens = carregarViagens();
+        viagens.push({ dataHora: formatarDataHora(new Date()), gratis: false });
+        salvarViagens(viagens);
+
+        const { cicloAtual, totalPagas } = contarStatus(viagens);
+        if (cicloAtual === 0 && totalPagas > 0 && totalPagas % VIAGENS_PARA_PREMIO === 0) {
+            mostrarFlash("🎉 Parabéns! Você completou 5 viagens e ganhou uma passagem grátis!", "sucesso");
+        } else {
+            mostrarFlash(`Viagem registrada! Faltam ${VIAGENS_PARA_PREMIO - cicloAtual} para a próxima grátis.`, "info");
+        }
+        render();
+    });
+
+    document.getElementById("btnUsarGratis").addEventListener("click", () => {
+        const viagens = carregarViagens();
+        const { gratisAcumuladas } = contarStatus(viagens);
+        if (gratisAcumuladas <= 0) {
+            mostrarFlash("Você ainda não tem nenhuma viagem grátis disponível.", "erro");
+            return;
+        }
+        viagens.push({ dataHora: formatarDataHora(new Date()), gratis: true });
+        salvarViagens(viagens);
+        mostrarFlash("🚌 Viagem grátis utilizada! Aproveite.", "sucesso");
+        render();
+    });
+
+    document.getElementById("btnResetar").addEventListener("click", () => {
+        if (confirm("Tem certeza que quer zerar todo o histórico?")) {
+            localStorage.removeItem(STORAGE_KEY);
+            mostrarFlash("Histórico zerado.", "info");
+            render();
+        }
+    });
+
+    render();
+</script>
+</body>
+</html>
